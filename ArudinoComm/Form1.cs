@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.IO;
 using System.IO.Ports;
 using System.Linq;
 using System.Text;
@@ -11,9 +12,9 @@ using System.Windows.Forms;
 
 namespace ArudinoComm
 {
-    public partial class Form1 : Form
+    public partial class autoScrollCB : Form
     {
-        public Form1()
+        public autoScrollCB()
         {
             InitializeComponent();
         }
@@ -46,6 +47,7 @@ namespace ArudinoComm
                     serialPort1.PortName = comportCB.Text;
                     serialPort1.BaudRate = Int32.Parse(baudrateCB.Text);
                     serialPort1.Open();
+                    InitializeChart();
                     return true;
                 }
             }
@@ -55,6 +57,23 @@ namespace ArudinoComm
             }
             return false;
         }
+
+        private void InitializeChart()
+        {
+            chart1.Series.Clear();
+            chart1.ChartAreas[0].AxisX.Title = "Time";
+            chart1.ChartAreas[0].AxisY.Title = "Temperature";
+
+            var series = new System.Windows.Forms.DataVisualization.Charting.Series
+            {
+                Name = "TempSeries",
+                Color = System.Drawing.Color.Blue,
+                ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line
+            };
+
+            chart1.Series.Add(series);
+        }
+
 
         private void disconnectBT_Click(object sender, EventArgs e)
         {
@@ -74,8 +93,51 @@ namespace ArudinoComm
 
         private void serialPort1_DataRecieved(object sender, EventArgs e)
         {
-            string dump = serialPort1.ReadLine();
-            incomingTB.Text = incomingTB.Text + dump;
+            try
+            {
+                string dump = serialPort1.ReadLine();
+
+                incomingTB.AppendText(dump.Trim() + Environment.NewLine);
+
+                if (autoCB.Checked)
+                {
+                    incomingTB.SelectionStart = incomingTB.Text.Length;
+                    incomingTB.ScrollToCaret();
+                }
+
+                // Parse and plot if CSV formatted
+                string[] parts = dump.Split(',');
+                if (parts.Length == 2 &&
+                    double.TryParse(parts[0], out double xVal) &&
+                    double.TryParse(parts[1], out double yVal))
+                {
+                    if (chart1.InvokeRequired)
+                    {
+                        chart1.Invoke(new Action(() =>
+                        {
+                            chart1.Series["TempSeries"].Points.AddXY(xVal, yVal);
+                        }));
+                    }
+                    else
+                    {
+                        chart1.Series["TempSeries"].Points.AddXY(xVal, yVal);
+                    }
+                }
+            }
+            catch (IOException ex)
+            {
+                MessageBox.Show("Arduino disconnected.\n" + ex.Message, "Connection Lost", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (serialPort1.IsOpen)
+                    serialPort1.Close();
+            }
+            catch (InvalidOperationException ex)
+            {
+                MessageBox.Show("Serial port was unexpectedly closed.\n" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Unknown error:\n" + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         private void clearBT_Click(object sender, EventArgs e)
@@ -101,6 +163,35 @@ namespace ArudinoComm
                 catch (Exception ex)
                 {
                     MessageBox.Show("Error saving file: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        
+        }
+        private void PlotDataFromTextBox()
+        {
+            chart1.Series.Clear();
+            chart1.ChartAreas[0].AxisX.Title = "Time";
+            chart1.ChartAreas[0].AxisY.Title = "Temperature";
+
+            var series = new System.Windows.Forms.DataVisualization.Charting.Series
+            {
+                Name = "TempSeries",
+                Color = System.Drawing.Color.Blue,
+                ChartType = System.Windows.Forms.DataVisualization.Charting.SeriesChartType.Line
+            };
+
+            chart1.Series.Add(series);
+
+            string[] lines = incomingTB.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (string line in lines.Skip(1)) // Skip header line
+            {
+                string[] parts = line.Split(',');
+                if (parts.Length == 2 &&
+                    double.TryParse(parts[0], out double xVal) &&
+                    double.TryParse(parts[1], out double yVal))
+                {
+                    series.Points.AddXY(xVal, yVal);
                 }
             }
         }
